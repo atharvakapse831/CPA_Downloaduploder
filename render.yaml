@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: cpa-media-service
+    env: node
+    region: oregon
+    plan: starter
+
+    buildCommand: |
+      npm install
+      pip install yt-dlp
+
+    startCommand: node src/server.js
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: REDIS_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: CPA_SERVICE_KEY
+        sync: false
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000
+      - key: RATE_LIMIT_MAX
+        value: 30
+      - key: YTDLP_TIMEOUT_MS
+        value: 30000
+      - key: CACHE_TTL_METADATA
+        value: 21600
+      - key: CACHE_TTL_THUMBNAIL
+        value: 86400
+
+    healthCheckPath: /api/health

@@ -59,4 +59,16 @@ const setMetadata  = (platform, id, d) => cacheSet(NS.metadata(platform, id), d,
 const getJobStatus = (jobId)           => cacheGet(NS.job(jobId));
 const setJobStatus = (jobId, status)   => cacheSet(NS.job(jobId), status, TTL.job);
 
+// Add this new function alongside getClient()
+function getBullMQClient() {
+  const url = process.env.REDIS_URL;
+  if (!url) throw new Error('REDIS_URL is not set');
+
+  return new Redis(url, {
+    tls: url.startsWith('rediss://') ? {} : undefined,
+    maxRetriesPerRequest: null, // required by BullMQ
+    connectTimeout: 5000,
+  });
+}
+
 module.exports = { getClient, cacheGet, cacheSet, cacheDel, getMetadata, setMetadata, getJobStatus, setJobStatus, NS, TTL };

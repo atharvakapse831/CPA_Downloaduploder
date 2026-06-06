@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Worker }            = require('bullmq');
-const { getClient }         = require('../cache/redis');
+const { getBullMQClient }   = require('../cache/redis');  // ← changed
 const { ytdlpExtract }      = require('../extractors/ytdlp');
 const { playwrightExtract } = require('../extractors/playwright');
 const { normalizeYtdlp }    = require('../utils/normalizer');
@@ -17,7 +17,6 @@ const worker = new Worker(
     logger.info('[worker] Processing job', { jobId, url });
     await setJobStatus(jobId, { status: 'processing', jobId, url });
 
-    // ── Step 1: yt-dlp ────────────────────────────────────────────────────
     let rawData = null;
     let source  = 'ytdlp';
     try {
@@ -31,10 +30,8 @@ const worker = new Worker(
       }
     }
 
-    // ── Step 2: Normalise ─────────────────────────────────────────────────
     let normalized = rawData ? normalizeYtdlp(rawData) : null;
 
-    // ── Step 3: Playwright fallback ───────────────────────────────────────
     if (!normalized || normalized.completeness < COMPLETENESS_THRESHOLD) {
       logger.info('[worker] Playwright fallback', { jobId, score: normalized?.completeness ?? 0 });
       try {
@@ -51,7 +48,6 @@ const worker = new Worker(
       throw new Error('All extractors failed: ' + url);
     }
 
-    // ── Step 4: Cache ─────────────────────────────────────────────────────
     const externalId = normalized.externalId || jobId;
     await setMetadata(platform, externalId, normalized);
 
@@ -60,12 +56,12 @@ const worker = new Worker(
     logger.info('[worker] Job complete', { jobId, completeness: normalized.completeness, source });
     return result;
   },
-  { connection: getClient(), concurrency: 5 }
+  { connection: getBullMQClient(), concurrency: 5 }  // ← changed
 );
 
-worker.on('completed', job  => logger.info('[worker] Succeeded',  { jobId: job.id }));
-worker.on('failed',    (job, err) => logger.error('[worker] Failed', { jobId: job?.id, error: err.message }));
-worker.on('error',     err  => logger.error('[worker] Error',     { error: err.message }));
+worker.on('completed', job      => logger.info('[worker] Succeeded',  { jobId: job.id }));
+worker.on('failed',   (job, err) => logger.error('[worker] Failed',    { jobId: job?.id, error: err.message }));
+worker.on('error',     err       => logger.error('[worker] Error',     { error: err.message }));
 
 logger.info('[worker] Media ingest worker started');
 module.exports = { worker };

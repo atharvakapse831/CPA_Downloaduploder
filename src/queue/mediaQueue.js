@@ -1,5 +1,5 @@
 const { Queue } = require('bullmq');
-const { getClient } = require('../cache/redis');
+const { getBullMQClient } = require('../cache/redis');
 const logger = require('../utils/logger');
 
 const QUEUE_NAME = 'cpa-media-ingest';
@@ -8,7 +8,7 @@ let _queue = null;
 function getQueue() {
   if (_queue) return _queue;
   _queue = new Queue(QUEUE_NAME, {
-    connection: getClient(),
+    connection: getBullMQClient(), // ← changed
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: 'exponential', delay: 2000 },

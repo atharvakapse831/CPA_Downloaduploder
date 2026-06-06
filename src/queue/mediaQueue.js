@@ -2,7 +2,7 @@ const { Queue } = require('bullmq');
 const { getClient } = require('../cache/redis');
 const logger = require('../utils/logger');
 
-const QUEUE_NAME = 'cpa:media:ingest';
+const QUEUE_NAME = 'cpa-media-ingest';
 let _queue = null;
 
 function getQueue() {

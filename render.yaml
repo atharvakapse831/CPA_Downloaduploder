@@ -9,7 +9,11 @@ services:
       npm install
       pip install yt-dlp
 
-    startCommand: node src/server.js
+    # ✅ FIX: start BOTH the HTTP server and the BullMQ worker in one process.
+    # Without this, jobs are queued but nothing ever picks them up.
+    startCommand: node src/server.js & node src/queue/worker.js & wait
+
+    healthCheckPath: /api/health
 
     envVars:
       - key: NODE_ENV
@@ -28,9 +32,19 @@ services:
         value: 30
       - key: YTDLP_TIMEOUT_MS
         value: 30000
+      - key: YTDLP_DOWNLOAD_TIMEOUT_MS
+        value: 120000
       - key: CACHE_TTL_METADATA
         value: 21600
       - key: CACHE_TTL_THUMBNAIL
         value: 86400
 
-    healthCheckPath: /api/health
+      # ✅ NEW: AWS credentials for S3 upload in worker.js
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: ap-south-1
+      - key: S3_BUCKET
+        value: cpacontentstream

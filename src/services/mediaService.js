@@ -8,11 +8,10 @@ const { v4: uuidv4 }        = require('uuid');
 const COMPLETENESS_THRESHOLD = 60;
 
 /**
- * Synchronous extraction.
- * Flow: Redis → yt-dlp → (async Playwright job if low completeness)
+ * Synchronous metadata extraction (used by /info).
+ * Flow: Redis cache → yt-dlp → (async Playwright enrichment if low completeness)
  */
 async function extractMetadata(url, platform) {
-  // URL-based cache key for first lookup (before we know externalId)
   const urlKey = `url:${Buffer.from(url).toString('base64').slice(0, 64)}`;
   const cached = await getMetadata(platform, urlKey);
   if (cached) {
@@ -20,18 +19,18 @@ async function extractMetadata(url, platform) {
     return { ...cached, fromCache: true };
   }
 
-  const rawData   = await ytdlpExtract(url); // throws on failure
+  const rawData    = await ytdlpExtract(url);
   const normalized = normalizeYtdlp(rawData);
   const externalId = normalized.externalId || urlKey;
 
-  // Cache by both keys for future lookups
   await setMetadata(platform, urlKey,     normalized);
   await setMetadata(platform, externalId, normalized);
 
-  // Enqueue Playwright enrichment if completeness is low
   if (normalized.completeness < COMPLETENESS_THRESHOLD) {
     const jobId = uuidv4();
-    logger.info('[service] Low completeness — queuing enrichment', { score: normalized.completeness, jobId });
+    logger.info('[service] Low completeness — queuing enrichment', {
+      score: normalized.completeness, jobId,
+    });
     enqueueExtraction({ url, platform, jobId }).catch(err =>
       logger.warn('[service] Failed to enqueue fallback', { error: err.message })
     );
@@ -42,12 +41,16 @@ async function extractMetadata(url, platform) {
 }
 
 /**
- * Async-only extraction — enqueues job, returns jobId immediately.
+ * ✅ NEW: Async download + S3 upload job.
+ *
+ * Used by POST /api/media/ingest.
+ * Enqueues a full download job (yt-dlp download → S3 upload → callbackUrl).
+ * jobId and callbackUrl are provided by the caller (CPA backend via CF Worker).
  */
-async function enqueueMetadataExtraction(url, platform) {
-  const jobId = uuidv4();
-  await enqueueExtraction({ url, platform, jobId });
+async function enqueueDownload({ url, platform, jobId, callbackUrl }) {
+  await enqueueExtraction({ url, platform, jobId, callbackUrl });
+  logger.info('[service] Download job enqueued', { jobId, url });
   return { jobId };
 }
 
-module.exports = { extractMetadata, enqueueMetadataExtraction };
+module.exports = { extractMetadata, enqueueDownload };

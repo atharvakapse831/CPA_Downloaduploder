@@ -71,4 +71,4 @@ function getBullMQClient() {
   });
 }
 
-module.exports = { getClient, cacheGet, cacheSet, cacheDel, getMetadata, setMetadata, getJobStatus, setJobStatus, NS, TTL };
+module.exports = { getClient, getBullMQClient, cacheGet, cacheSet, cacheDel, getMetadata, setMetadata, getJobStatus, setJobStatus, NS, TTL };

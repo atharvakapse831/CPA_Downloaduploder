@@ -1,4 +1,17 @@
 require('dotenv').config();
+
+// ── Instagram cookie auth (decode from env var into a local file) ──────────
+const fsCookie = require('fs');
+const pathCookie = require('path');
+
+if (process.env.IG_COOKIES_B64) {
+  const cookiesPath = pathCookie.join('/tmp', 'ig_cookies.txt');
+  fsCookie.writeFileSync(cookiesPath, Buffer.from(process.env.IG_COOKIES_B64, 'base64').toString('utf-8'));
+  process.env.IG_COOKIES_PATH = cookiesPath;
+  console.log('Instagram cookies loaded (worker)');
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 const { Worker }            = require('bullmq');
 const Redis                 = require('ioredis');
 const { execFile }          = require('child_process');
@@ -41,7 +54,12 @@ const connection = new Redis(process.env.REDIS_URL, {
 async function downloadVideo(url, jobId) {
   const outputPath = path.join(TMP, `${jobId}_raw.mp4`);
 
+  const cookieArgs = process.env.IG_COOKIES_PATH
+    ? ['--cookies', process.env.IG_COOKIES_PATH]
+    : [];
+
   const args = [
+    ...cookieArgs,
     '--no-playlist',
     '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
@@ -51,7 +69,7 @@ async function downloadVideo(url, jobId) {
     url,
   ];
 
-  logger.info('[worker] Downloading video', { jobId, url });
+  logger.info('[worker] Downloading video', { jobId, url, usingCookies: cookieArgs.length > 0 });
 
   try {
     await execFileAsync('yt-dlp', args, {

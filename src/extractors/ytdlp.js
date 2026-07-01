@@ -7,12 +7,13 @@ const execFileAsync = promisify(execFile);
 const TIMEOUT_MS  = parseInt(process.env.YTDLP_TIMEOUT_MS      || '30000',     10);
 const MAX_BUFFER  = parseInt(process.env.YTDLP_MAX_BUFFER_BYTES || '10485760',  10);
 
-/**
- * Extracts metadata using yt-dlp.
- * Uses execFile (NOT exec) — URL is passed as an array arg, never interpolated into shell.
- */
 async function ytdlpExtract(url) {
+  const cookieArgs = process.env.IG_COOKIES_PATH
+    ? ['--cookies', process.env.IG_COOKIES_PATH]
+    : [];
+
   const args = [
+    ...cookieArgs,
     '--dump-single-json',
     '--no-download',
     '--no-warnings',
@@ -22,14 +23,14 @@ async function ytdlpExtract(url) {
     url,
   ];
 
-  logger.debug('[yt-dlp] Starting extraction', { url });
+  logger.debug('[yt-dlp] Starting extraction', { url, usingCookies: cookieArgs.length > 0 });
 
   let stdout;
   try {
     ({ stdout } = await execFileAsync('yt-dlp', args, {
       timeout: TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,
-      shell: false,   // MUST be false — prevents shell injection
+      shell: false,
     }));
   } catch (err) {
     const msg = err.stderr || err.message || 'yt-dlp failed';

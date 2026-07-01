@@ -1,4 +1,17 @@
 require('dotenv').config();
+
+// ── Instagram cookie auth (decode from env var into a local file) ──────────
+const fs = require('fs');
+const path = require('path');
+
+if (process.env.IG_COOKIES_B64) {
+  const cookiesPath = path.join('/tmp', 'ig_cookies.txt');
+  fs.writeFileSync(cookiesPath, Buffer.from(process.env.IG_COOKIES_B64, 'base64').toString('utf-8'));
+  process.env.IG_COOKIES_PATH = cookiesPath;
+  console.log('Instagram cookies loaded');
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 const express    = require('express');
 const helmet     = require('helmet');
 const cors       = require('cors');
@@ -52,7 +65,8 @@ app.get('/api/health', async (_req, res) => {
   try {
     const { execFile } = require('child_process');
     const { promisify } = require('util');
-    await promisify(execFile)('yt-dlp', ['--version'], { timeout: 5000 });
+    const cookieArgs = process.env.IG_COOKIES_PATH ? ['--cookies', process.env.IG_COOKIES_PATH] : [];
+    await promisify(execFile)('yt-dlp', [...cookieArgs, '--version'], { timeout: 5000 });
     checks.ytdlp = 'ok';
   } catch { checks.ytdlp = 'error'; }
 

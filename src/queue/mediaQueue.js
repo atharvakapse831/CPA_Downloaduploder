@@ -8,12 +8,13 @@ let _queue = null;
 function getQueue() {
   if (_queue) return _queue;
   _queue = new Queue(QUEUE_NAME, {
-    connection: getBullMQClient(), // ← changed
+    connection: getBullMQClient(),
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: 'exponential', delay: 2000 },
-      removeOnComplete: { count: 500 },
-      removeOnFail:    { count: 100 },
+      // ── Remove jobs immediately after done — saves storage
+      removeOnComplete: true,
+      removeOnFail: true,
     },
   });
   _queue.on('error', err => logger.error('[queue] BullMQ error', { error: err.message }));

@@ -1,7 +1,7 @@
 require('dotenv').config();
 
-// ── Instagram cookie auth (decode from env var into a local file) ──────────
-const fsCookie = require('fs');
+// ── Instagram cookie auth ─────────────────────────────────────
+const fsCookie   = require('fs');
 const pathCookie = require('path');
 
 if (process.env.IG_COOKIES_B64) {
@@ -10,22 +10,19 @@ if (process.env.IG_COOKIES_B64) {
   process.env.IG_COOKIES_PATH = cookiesPath;
   console.log('Instagram cookies loaded (worker)');
 }
-// ─────────────────────────────────────────────────────────────────────────
 
-const { Worker }            = require('bullmq');
-const Redis                 = require('ioredis');
-const { execFile }          = require('child_process');
-const { promisify }         = require('util');
-const fs                    = require('fs');
-const path                  = require('path');
+const { Worker }   = require('bullmq');
+const Redis        = require('ioredis');
+const { execFile } = require('child_process');
+const { promisify} = require('util');
+const fs           = require('fs');
+const path         = require('path');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
-const { setJobStatus } = require('../cache/redis');
-const logger           = require('../utils/logger');
-const { QUEUE_NAME }   = require('./mediaQueue');
+const logger       = require('../utils/logger');
+const { QUEUE_NAME } = require('./mediaQueue');
 
 const execFileAsync = promisify(execFile);
-
 const TMP = process.env.TMP_DIR || '/tmp';
 
 const s3 = new S3Client({
@@ -38,19 +35,14 @@ const s3 = new S3Client({
 
 const BUCKET = process.env.S3_BUCKET || 'cpacontentstream';
 
-// BullMQ needs its own Redis connection with maxRetriesPerRequest: null
 const connection = new Redis(process.env.REDIS_URL, {
   tls: process.env.REDIS_URL.startsWith('rediss://') ? {} : undefined,
   maxRetriesPerRequest: null,
   connectTimeout: 5000,
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────
 
-/**
- * Downloads video to a temp file using yt-dlp.
- * Returns the local file path.
- */
 async function downloadVideo(url, jobId) {
   const outputPath = path.join(TMP, `${jobId}_raw.mp4`);
 
@@ -69,7 +61,7 @@ async function downloadVideo(url, jobId) {
     url,
   ];
 
-  logger.info('[worker] Downloading video', { jobId, url, usingCookies: cookieArgs.length > 0 });
+  logger.info('[worker] Downloading video', { jobId, url });
 
   try {
     await execFileAsync('yt-dlp', args, {
@@ -92,10 +84,6 @@ async function downloadVideo(url, jobId) {
   return outputPath;
 }
 
-/**
- * Uploads a local file to S3.
- * Returns the S3 key.
- */
 async function uploadToS3(localPath, jobId) {
   const s3Key = `raw/${jobId}/video.mp4`;
   const body  = fs.readFileSync(localPath);
@@ -112,10 +100,6 @@ async function uploadToS3(localPath, jobId) {
   return s3Key;
 }
 
-/**
- * ✅ THE MISSING PIECE: fires the callbackUrl so the CPA backend
- * knows the download succeeded and can invoke Lambda.
- */
 async function fireCallback(callbackUrl, payload) {
   logger.info('[worker] Firing callback', { callbackUrl, jobId: payload.jobId });
 
@@ -135,13 +119,12 @@ async function fireCallback(callbackUrl, payload) {
 
 function cleanup(...paths) {
   for (const p of paths) {
-    try {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch (_) {}
+    try { if (fs.existsSync(p)) fs.unlinkSync(p); }
+    catch (_) {}
   }
 }
 
-// ── BullMQ Worker ─────────────────────────────────────────────────────────
+// ─── BullMQ Worker ────────────────────────────────────────────
 
 const worker = new Worker(
   QUEUE_NAME,
@@ -149,57 +132,55 @@ const worker = new Worker(
     const { url, jobId, callbackUrl } = job.data;
 
     logger.info('[worker] Job started', { jobId, url, hasCallback: !!callbackUrl });
-    await setJobStatus(jobId, { status: 'processing', jobId, url });
+
+    // ── No Redis job status tracking — Supabase handles this
+    // Removed setJobStatus calls to save Redis storage
 
     let localPath = null;
 
     try {
-      // ── Step 1: Download video to /tmp ──────────────────────────────────
-      // Metadata already fetched by meta-fetch service before publish — skip here
       localPath = await downloadVideo(url, jobId);
-
-      // ── Step 2: Upload to S3 ────────────────────────────────────────────
       const s3Key = await uploadToS3(localPath, jobId);
 
-      // ── Step 3: Mark complete in Redis ──────────────────────────────────
-      const result = { s3Key, bucket: BUCKET, jobId };
-      await setJobStatus(jobId, { status: 'complete', jobId, result });
-
-      // ── Step 5: Fire callback → CPA backend instagramWebhook ────────────
       if (callbackUrl) {
         await fireCallback(callbackUrl, {
           jobId,
           status: 'SUCCESS',
           s3Key,
           bucket: BUCKET,
-          videoUrl: null, // Lambda will produce the final CDN URL
+          videoUrl: null,
         });
       } else {
-        logger.warn('[worker] No callbackUrl — job complete but nothing notified', { jobId });
+        logger.warn('[worker] No callbackUrl', { jobId });
       }
 
       logger.info('[worker] Job finished', { jobId, s3Key });
-      return result;
+      return { s3Key, bucket: BUCKET, jobId };
 
     } catch (err) {
       logger.error('[worker] Job failed', { jobId, error: err.message });
-      await setJobStatus(jobId, { status: 'failed', jobId, error: err.message });
 
-      // Best-effort: notify backend of failure so job doesn't hang forever
       if (callbackUrl) {
         await fireCallback(callbackUrl, {
           jobId,
           status: 'FAILED',
           error: err.message,
-        }).catch(cbErr => logger.warn('[worker] Failure callback also failed', { error: cbErr.message }));
+        }).catch(cbErr => logger.warn('[worker] Failure callback failed', { error: cbErr.message }));
       }
 
-      throw err; // Let BullMQ retry
+      throw err;
     } finally {
       if (localPath) cleanup(localPath);
     }
   },
-  { connection, concurrency: 3 }
+  {
+    connection,
+    concurrency: 3,
+    // ── Reduce Redis polling frequency
+    stalledInterval: 60000,   // check stalled jobs every 60s (default 30s)
+    lockDuration:    60000,   // lock job for 60s
+    lockRenewTime:   30000,   // renew lock at 30s
+  }
 );
 
 worker.on('completed', job       => logger.info('[worker] Succeeded', { jobId: job.id }));
